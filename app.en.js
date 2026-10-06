@@ -461,6 +461,56 @@ function setFormData(patch) {
   render();
 }
 
+// Time input helper:
+// Accepts easy numeric input such as 630, 0630, 930, 0900, 1800, or 09:30
+// and converts it to the HH:MM format used by the scheduling engine.
+function normalizeTimeInput(value) {
+  let raw = String(value || '').trim();
+
+  if (!raw) return '';
+
+  // Allow both "09:30" and numeric input such as "930" / "0930".
+  if (raw.includes(':')) {
+    const match = raw.match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!match) return '';
+
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+
+    if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
+  raw = raw.replace(/\D/g, '');
+
+  if (raw.length === 1 || raw.length === 2) {
+    const h = Number(raw);
+    if (h < 0 || h > 23) return '';
+    return String(h).padStart(2, '0') + ':00';
+  }
+
+  if (raw.length === 3) raw = '0' + raw;
+  if (raw.length > 4) raw = raw.slice(0, 4);
+
+  if (raw.length !== 4) return '';
+
+  const h = Number(raw.slice(0, 2));
+  const m = Number(raw.slice(2, 4));
+
+  if (h < 0 || h > 23 || m < 0 || m > 59) return '';
+
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+function setTimeField(key, value) {
+  const normalized = normalizeTimeInput(value);
+  if (!normalized) return;
+
+  state.formData = { ...state.formData, [key]: normalized };
+  render();
+}
+
 const TASK_PRESETS = [
   { title: 'Exercise', duration: 45, priority: 'Medium', type: 'Personal' },
   { title: 'Self-development reading', duration: 30, priority: 'Low', type: 'Personal' },
@@ -568,13 +618,13 @@ function renderWizard() {
       <h3 class="font-semibold text-lg text-cyan-300 flex items-center gap-2">${Icons.clock} 1. Daily Routine & Work Schedule</h3>
       <div class="grid grid-cols-2 gap-4">
         <div><label class="block text-xs font-medium text-slate-400 mb-1">Wake-up time</label>
-          <input type="time" value="${f.wakeTime}" oninput="setFormData({wakeTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="e.g. 0630" value="${f.wakeTime}" onblur="setTimeField('wakeTime', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">Bedtime</label>
-          <input type="time" value="${f.sleepTime}" oninput="setFormData({sleepTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="e.g. 2300" value="${f.sleepTime}" onblur="setTimeField('sleepTime', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">Work start</label>
-          <input type="time" value="${f.workStart}" oninput="setFormData({workStart:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="e.g. 0900" value="${f.workStart}" onblur="setTimeField('workStart', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">Work end</label>
-          <input type="time" value="${f.workEnd}" oninput="setFormData({workEnd:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="e.g. 1800" value="${f.workEnd}" onblur="setTimeField('workEnd', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div class="col-span-2"><label class="block text-xs font-medium text-slate-400 mb-1">Commute time (one-way, minutes)</label>
           <input type="number" min="0" max="180" step="5" value="${f.travelMinutes}" oninput="setFormData({travelMinutes: parseInt(this.value)||0})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" />
           <p class="text-[11px] text-slate-500 mt-1">Used to work out when you need to leave and when you'll get home (one-way value, applied to both directions).</p></div>
