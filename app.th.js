@@ -23,13 +23,11 @@ const Icons = {
   download: icon('<path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>', 16),
   plus: icon('<path d="M12 5v14M5 12h14"/>', 16),
   trash: icon('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0-1 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 6"/>', 14),
-  robot: icon('<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 2v6M9 13h.01M15 13h.01"/>'),
-  key: icon('<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5 19 11l3-3-3.5-3.5"/>', 16)
+  robot: icon('<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 2v6M9 13h.01M15 13h.01"/>')
 };
+
 // =========================================================================
 // Anonymization engine (Privacy Shield)
-// Scrubs likely personal names, companies and Thai bank names before any
-// data leaves the browser. Runs 100% client-side.
 // =========================================================================
 const THAI_BANKS = [
   'กสิกรไทย', 'ไทยพาณิชย์', 'กรุงไทย', 'กรุงเทพ', 'กรุงศรีอยุธยา', 'กรุงศรี',
@@ -49,11 +47,9 @@ function anonymize(text) {
   out = out.replace(/[A-Z][A-Za-z]*\s?(Corp\.?|Co\.,?\s?Ltd\.?|Inc\.?|Company)/g, '[ORG_TOKEN]');
   return out;
 }
+
 // =========================================================================
 // Rule-based Dynamic Scheduling Engine (Smart Cut algorithm)
-// Runs entirely offline/deterministically from the user's real inputs.
-// This is the app's functional backbone; the optional AI layer on top
-// (see js/recommendations.js) only adds natural-language personalised tips.
 // =========================================================================
 function toMin(t) {
   const [h, m] = t.split(':').map(Number);
@@ -67,15 +63,6 @@ function prioRank(t) {
   return t.priority === 'High' ? 0 : t.priority === 'Medium' ? 1 : 2;
 }
 
-// -------------------------------------------------------------------------
-// Scheduling philosophy: work hours are OFF LIMITS. The user already runs
-// their own work schedule (meetings, writing, tasks) elsewhere, so between
-// workStart and workEnd this engine only ever writes a single, untouched
-// "ทำงาน" block — no lunch break, no breathing exercise, no desk stretch,
-// nothing else is inserted there. All personal/growth activities are only
-// ever placed in the two free windows that actually belong to the user:
-// the morning before work, and the evening after work.
-// -------------------------------------------------------------------------
 function computeSchedule(formData) {
   const wake = toMin(formData.wakeTime);
   let sleep = toMin(formData.sleepTime);
@@ -94,9 +81,6 @@ function computeSchedule(formData) {
   const fatigueSevere = formData.fatigue >= 7;
   const fatigueFactor = fatigueSevere ? 0.35 : formData.fatigue >= 5 ? 0.6 : 1;
 
-  // Helper: place as many queued personal activities as fit into [cursor, limit),
-  // Smart-Cutting (shrinking) any that don't fit or that fatigue says to shrink.
-  // Returns the tasks it couldn't fit at all, plus the new cursor.
   function fitQueue(queue, cursor, limit, windowLabel) {
     const leftover = [];
     queue.forEach((t) => {
@@ -130,7 +114,6 @@ function computeSchedule(formData) {
     return { cursor, leftover };
   }
 
-  // ---------------- Fixed morning routine (wake -> travel-to-work) ----------------
   let mCursor = wake;
   push(mCursor, mCursor + 20, 'ตื่นนอน & Morning Stretch', 'Wellbeing', 'Health');
   mCursor += 20;
@@ -141,16 +124,10 @@ function computeSchedule(formData) {
   const morningWindowEnd = Math.max(mCursor, workStart - travelMinutes);
   const morningCapacity = morningWindowEnd - morningWindowStart;
 
-  // ---------------- Fixed evening window (after work+travel -> wind-down) ----------------
   const eveningWindowStart = workEnd + travelMinutes;
   const eveningWindowEnd = Math.max(eveningWindowStart, sleep - 40);
   const eveningCapacity = eveningWindowEnd - eveningWindowStart;
 
-  // Every task is a free-time personal activity now (no "Work" tasks are
-  // scheduled by this engine — work time is a single fixed block below).
-  // Each task can be pinned to a window via t.when ('morning' | 'evening'),
-  // or left as 'auto' so the engine puts it wherever there's actually room —
-  // instead of always cramming everything into the morning first.
   const allTasks = formData.tasks.filter((t) => t.type !== 'Work');
   const morningQueue = [];
   const eveningQueue = [];
@@ -161,9 +138,6 @@ function computeSchedule(formData) {
     else autoQueue.push(t);
   });
 
-  // Greedily send each auto task to whichever window currently has more
-  // *remaining* room, so free evening time actually gets used instead of
-  // sitting empty while the morning gets overstuffed.
   let simMorningRemain = morningCapacity - morningQueue.reduce((s, t) => s + t.duration, 0);
   let simEveningRemain = eveningCapacity - eveningQueue.reduce((s, t) => s + t.duration, 0);
   autoQueue
@@ -190,15 +164,12 @@ function computeSchedule(formData) {
   }
   if (workStart > mCursor) push(mCursor, workStart, `เดินทางไปทำงาน${travelMinutes ? ' (~' + travelMinutes + ' นาที)' : ''}`, 'Routine', 'Life');
 
-  // ---------------- Work hours: one single, untouched block ----------------
   push(workStart, workEnd, 'ทำงาน (ตามตารางงานของคุณ)', 'Work', 'ไม่แตะต้อง');
 
-  // ---------------- Evening: after work -> wind-down before sleep ----------------
   let eCursor = workEnd;
   if (eveningWindowStart > eCursor) push(eCursor, eveningWindowStart, `เดินทางกลับบ้าน${travelMinutes ? ' (~' + travelMinutes + ' นาที)' : ''}`, 'Routine', 'Life');
   eCursor = eveningWindowStart;
 
-  // Anything that didn't fit in the morning gets one more chance in the evening.
   const combinedEveningQueue = eveningQueue.concat(morningResult.leftover).sort((a, b) => prioRank(a) - prioRank(b));
   const eveningResult = fitQueue(combinedEveningQueue, eCursor, eveningWindowEnd, 'ช่วงเย็น');
   eCursor = eveningResult.cursor;
@@ -222,10 +193,9 @@ function computeSchedule(formData) {
   const workMinutes = workEnd - workStart;
   return { blocks, cuts, focusMinutes: workMinutes };
 }
+
 // =========================================================================
-// Persistence — remembers the visitor's last plan in THIS browser only.
-// No account, no server: plain localStorage, so it works on GitHub Pages
-// or any static host with zero backend.
+// Persistence & Export
 // =========================================================================
 const PLAN_STORAGE_KEY = 'aiLifePlanner:lastPlan';
 
@@ -241,22 +211,9 @@ function loadSavedPlan() {
 function savePlan(payload) {
   try {
     localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(payload));
-  } catch (e) {
-    /* storage full/unavailable — non-fatal */
-  }
+  } catch (e) {}
 }
 
-function clearSavedPlan() {
-  try {
-    localStorage.removeItem(PLAN_STORAGE_KEY);
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-// =========================================================================
-// Export — plain browser download via Blob, no server round-trip needed.
-// =========================================================================
 function downloadFile(filename, text, mime) {
   const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -267,9 +224,6 @@ function downloadFile(filename, text, mime) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-function downloadTextFile(filename, text) {
-  downloadFile(filename, text, 'text/plain');
 }
 
 function downloadSchedule() {
@@ -290,12 +244,9 @@ function downloadSchedule() {
           .map((c) => '- ' + c.task + ': ' + c.original + ' -> ' + c.adjusted + ' (' + c.reason + ')')
           .join('\n')
       : '');
-  downloadTextFile('my-schedule.txt', text);
+  downloadFile('my-schedule.txt', text, 'text/plain');
 }
 
-// ICS (.ics) calendar file — importable into Google Calendar, Outlook,
-// Apple Calendar, etc. Events are placed on today's date; the person can
-// drag them to another day, or set it to repeat daily, after importing.
 function downloadCalendar() {
   if (!state.scheduleResult) {
     alert('ยังไม่มีตารางเวลาให้ดาวน์โหลด');
@@ -330,9 +281,6 @@ function downloadCalendar() {
   downloadFile('my-schedule.ics', ics, 'text/calendar');
 }
 
-// PDF — no library needed: trigger the browser's native print dialog with a
-// print stylesheet that hides everything except the schedule, so "Save as
-// PDF" in that dialog produces a clean PDF.
 function printSchedule() {
   if (!state.scheduleResult) {
     alert('ยังไม่มีตารางเวลาให้พิมพ์');
@@ -340,39 +288,11 @@ function printSchedule() {
   }
   window.print();
 }
+
 // =========================================================================
-// 4-dimension recommendations
-//
-// Mode 1 (default, always available): deterministic rule-based text built
-// from the user's own numbers — no network call, works completely offline.
-//
-// Mode 2 (optional): if the visitor pastes their own Anthropic API key into
-// the Privacy & AI Settings panel, the app calls the real Claude API
-// directly from the browser to generate a personalised version instead.
-// The key never leaves this browser except in that direct call — there is
-// no server of ours in between.
+// Rule-based Recommendations (Offline 100%)
 // =========================================================================
-
-const AI_KEY_STORAGE_KEY = 'aiLifePlanner:anthropicApiKey';
-const AI_MODEL = 'claude-haiku-4-5';
-
-function getStoredApiKey() {
-  try {
-    return localStorage.getItem(AI_KEY_STORAGE_KEY) || '';
-  } catch (e) {
-    return '';
-  }
-}
-function setStoredApiKey(key) {
-  try {
-    if (key) localStorage.setItem(AI_KEY_STORAGE_KEY, key);
-    else localStorage.removeItem(AI_KEY_STORAGE_KEY);
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-function fallbackRecommendations(formData) {
+function getRuleRecommendations(formData) {
   return {
     fitness: `ลักษณะงาน: ${formData.workStyle.split('(')[0].trim()} แนะนำ Desk Stretch / Posture Correction ทุก ๆ 2 ชั่วโมง และปรับความหนักของการออกกำลังกายให้เหมาะกับระดับความเหนื่อยล้า (${formData.fatigue}/10)`,
     nutrition: `พลังงานกายอยู่ที่ ${formData.energy}/10 ควรพักสายตาและเติมน้ำทุก 2 ชั่วโมง พร้อมกำหนดมื้ออาหารให้ตรงเวลาเพื่อรักษาระดับพลังงานตลอดวัน`,
@@ -381,50 +301,6 @@ function fallbackRecommendations(formData) {
   };
 }
 
-async function getAIRecommendations(formData, cuts) {
-  const apiKey = getStoredApiKey();
-  if (!apiKey) return null; // no key saved -> caller falls back to rule-based text
-
-  const anonTasks = formData.tasks.map(
-    (t) => anonymize(t.title) + ' (' + t.type + ', ' + t.priority + ', ' + t.duration + 'min)'
-  );
-  const prompt =
-    'คุณคือ AI Life Design & Schedule Architect ผู้เชี่ยวชาญด้านการจัดสรรเวลา ลดความเหนื่อยล้า และความเครียด\n\n' +
-    'ข้อมูลผู้ใช้ (ข้อมูลส่วนบุคคลถูกลบออกแล้วโดยระบบ Anonymization):\n' +
-    '- ระดับพลังงาน: ' + formData.energy + '/10, ความเหนื่อยล้าสะสม: ' + formData.fatigue + '/10, ความเครียดสะสม: ' + formData.stress + '/10\n' +
-    '- ลักษณะงาน: ' + formData.workStyle + '\n' +
-    '- รายการกิจกรรม: ' + anonTasks.join(' | ') + '\n' +
-    '- รายการที่ระบบ Smart Cut ปรับลดเวลาอัตโนมัติ: ' + (cuts.map((c) => c.task + ' -> ' + c.adjusted).join(' | ') || 'ไม่มี') + '\n\n' +
-    'กรุณาแนะนำกิจกรรมสั้น ๆ (1-2 ประโยคภาษาไทยต่อข้อ เจาะจงกับข้อมูลข้างต้น ไม่ใช่คำแนะนำทั่วไป) ใน 4 มิติ ' +
-    'ตอบเป็น JSON เท่านั้น ห้ามมีคำอธิบายอื่นใดนอก JSON ตามรูปแบบนี้: {"fitness": "...", "nutrition": "...", "mental": "...", "growth": "..."}';
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        max_tokens: 700,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const text = (data.content || []).map((b) => b.text || '').join('');
-    const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
-    if (parsed && parsed.fitness) return parsed;
-    return null;
-  } catch (e) {
-    console.warn('AI recommendation call failed, using offline fallback instead:', e);
-    return null;
-  }
-}
 // =========================================================================
 // State
 // =========================================================================
@@ -450,8 +326,7 @@ let state = {
   },
   isGenerated: false,
   scheduleResult: null,
-  anonDemoInput: 'ประชุมกับคุณอนันต์ ธนาคารกรุงไทย เรื่องโปรเจกต์ของ บริษัท เทคคอร์ป จำกัด',
-  apiKeyInput: getStoredApiKey()
+  anonDemoInput: 'ประชุมกับคุณอนันต์ ธนาคารกรุงไทย เรื่องโปรเจกต์ของ บริษัท เทคคอร์ป จำกัด'
 };
 
 function setState(patch) {
@@ -503,33 +378,25 @@ function setTaskWhen(id, when) {
   render();
 }
 
-async function handleGeneratePlan() {
+function handleGeneratePlan() {
   const result = computeSchedule(state.formData);
-  state.scheduleResult = { blocks: result.blocks, cuts: result.cuts, focusMinutes: result.focusMinutes, recommendations: null, aiStatus: 'loading' };
+  const recs = getRuleRecommendations(state.formData);
+  state.scheduleResult = { 
+    blocks: result.blocks, 
+    cuts: result.cuts, 
+    focusMinutes: result.focusMinutes, 
+    recommendations: recs, 
+    aiStatus: 'offline' 
+  };
   state.isGenerated = true;
   state.activeTab = 'dashboard';
-  render();
-
-  const recs = await getAIRecommendations(state.formData, result.cuts);
-  state.scheduleResult.recommendations = recs || fallbackRecommendations(state.formData);
-  state.scheduleResult.aiStatus = recs ? 'ai' : 'fallback';
   render();
 
   savePlan({ formData: state.formData, scheduleResult: state.scheduleResult, savedAt: Date.now() });
 }
 
-function handleSaveApiKey() {
-  const el = document.getElementById('apiKeyInput');
-  const val = el ? el.value.trim() : '';
-  setStoredApiKey(val);
-  setState({ apiKeyInput: val });
-}
-function handleClearApiKey() {
-  setStoredApiKey('');
-  setState({ apiKeyInput: '' });
-}
 // =========================================================================
-// Render helpers
+// Render helpers & Navigation
 // =========================================================================
 function navButton(id, label, iconSvg, disabled) {
   const active = state.activeTab === id;
@@ -556,406 +423,7 @@ function renderHeader() {
       ${navButton('wizard', 'Setup Wizard', Icons.clock)}
       ${navButton('dashboard', 'Life Dashboard', Icons.calendar, !state.isGenerated)}
       ${navButton('prompt', 'RCTF Prompt Engine', Icons.code)}
-      ${navButton('privacy', 'Privacy & AI Settings', Icons.shield)}
+      ${navButton('privacy', 'Privacy & Shield', Icons.shield)}
     </nav>
   </header>`;
 }
-
-function renderWizard() {
-  const f = state.formData;
-  let inner = '';
-  if (state.step === 1) {
-    inner = `
-    <div class="space-y-6">
-      <h3 class="font-semibold text-lg text-cyan-300 flex items-center gap-2">${Icons.clock} 1. ช่วงเวลาปกติและตารางงาน (Daily Routine)</h3>
-      <div class="grid grid-cols-2 gap-4">
-        <div><label class="block text-xs font-medium text-slate-400 mb-1">เวลาตื่นนอน</label>
-          <input type="time" value="${f.wakeTime}" oninput="setFormData({wakeTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
-        <div><label class="block text-xs font-medium text-slate-400 mb-1">เข้านอน</label>
-          <input type="time" value="${f.sleepTime}" oninput="setFormData({sleepTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
-        <div><label class="block text-xs font-medium text-slate-400 mb-1">เริ่มงาน</label>
-          <input type="time" value="${f.workStart}" oninput="setFormData({workStart:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
-        <div><label class="block text-xs font-medium text-slate-400 mb-1">เลิกงาน</label>
-          <input type="time" value="${f.workEnd}" oninput="setFormData({workEnd:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
-        <div class="col-span-2"><label class="block text-xs font-medium text-slate-400 mb-1">เวลาเดินทาง (ต่อเที่ยว, นาที)</label>
-          <input type="number" min="0" max="180" step="5" value="${f.travelMinutes}" oninput="setFormData({travelMinutes: parseInt(this.value)||0})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" />
-          <p class="text-[11px] text-slate-500 mt-1">ใช้คำนวณเวลาออกจากบ้านและเวลาถึงบ้าน (นับเที่ยวเดียว จะถูกใช้ทั้งขาไปและขากลับ)</p></div>
-      </div>
-      <div class="p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-lg text-xs text-indigo-200">
-        ℹ️ ช่วง "เริ่มงาน–เลิกงาน" จะถูกกันไว้เป็นบล็อก <strong>"ทำงาน"</strong> เดียว ระบบจะไม่แทรกกิจกรรม ประชุม หรือพักเบรกใด ๆ ลงไปในช่วงเวลานี้ทั้งสิ้น เพราะถือว่าคุณมีตารางงานของตัวเองอยู่แล้ว — ระบบจะจัดกิจกรรมทั้งหมดในขั้นตอนถัดไปเฉพาะช่วงเวลาว่าง "ก่อนเข้างาน" หรือ "หลังเลิกงาน" เท่านั้น
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">ลักษณะงาน (Work Style)</label>
-        <select onchange="setFormData({workStyle:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none">
-          <option ${f.workStyle.startsWith('Sedentary') ? 'selected' : ''}>Sedentary / Desk Work (นั่งโต๊ะทำงานทั้งวัน)</option>
-          <option ${f.workStyle.startsWith('Active') ? 'selected' : ''}>Active / On the move (ต้องเดินทาง/เคลื่อนไหวบ่อย)</option>
-          <option ${f.workStyle.startsWith('Hybrid') ? 'selected' : ''}>Hybrid Work (สลับนั่งโต๊ะและประชุม)</option>
-        </select>
-      </div>
-      <button onclick="setState({step:2})" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium flex justify-center items-center gap-2 transition">ถัดไป: ประเมินพลังงานและกายภาพ ${Icons.arrow}</button>
-    </div>`;
-  } else if (state.step === 2) {
-    inner = `
-    <div class="space-y-6">
-      <h3 class="font-semibold text-lg text-cyan-300 flex items-center gap-2">${Icons.heart} 2. ประเมินสภาวะร่างกายและความล้า (Energy & Stress Sliders)</h3>
-      <div class="space-y-4">
-        <div><div class="flex justify-between text-sm mb-1"><span>ระดับพลังงานกาย (Energy Level):</span><span class="font-bold text-indigo-400">${f.energy} / 10</span></div>
-          <input type="range" min="1" max="10" value="${f.energy}" oninput="setFormData({energy:parseInt(this.value)})" class="w-full" /></div>
-        <div><div class="flex justify-between text-sm mb-1"><span>ความเหนื่อยล้าสะสม (Fatigue):</span><span class="font-bold text-amber-400">${f.fatigue} / 10</span></div>
-          <input type="range" min="1" max="10" value="${f.fatigue}" oninput="setFormData({fatigue:parseInt(this.value)})" class="w-full" style="accent-color:#f59e0b" /></div>
-        <div><div class="flex justify-between text-sm mb-1"><span>ความเครียดสะสม (Stress):</span><span class="font-bold text-rose-400">${f.stress} / 10</span></div>
-          <input type="range" min="1" max="10" value="${f.stress}" oninput="setFormData({stress:parseInt(this.value)})" class="w-full" style="accent-color:#f43f5e" /></div>
-      </div>
-      <div class="flex gap-4">
-        <button onclick="setState({step:1})" class="w-1/3 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium">ย้อนกลับ</button>
-        <button onclick="setState({step:3})" class="w-2/3 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium flex justify-center items-center gap-2">ถัดไป: งานและกิจกรรมที่ต้องทำ ${Icons.arrow}</button>
-      </div>
-    </div>`;
-  } else {
-    inner = `
-    <div class="space-y-6">
-      <h3 class="font-semibold text-lg text-cyan-300 flex items-center gap-2">${Icons.zap} 3. กิจกรรมนอกเวลางานที่ต้องการจัดลงตาราง</h3>
-      <p class="text-xs text-slate-500 -mt-4">ใส่เฉพาะกิจกรรมส่วนตัว/พัฒนาตนเองที่อยากทำ "ก่อนเข้างาน" หรือ "หลังเลิกงาน" เท่านั้น — ไม่ต้องใส่งาน ประชุม หรืออีเมล เพราะช่วงเวลาทำงานของคุณจะถูกกันไว้เป็นบล็อกเดียวโดยไม่ถูกแตะต้อง</p>
-      <div class="space-y-3">
-        ${f.tasks
-          .map(
-            (t) => `
-          <div class="p-3 bg-slate-900 border border-slate-700 rounded-lg flex justify-between items-center gap-2 flex-wrap">
-            <div class="min-w-0">
-              <span class="font-medium text-sm text-slate-200">${t.title}</span>
-              <div class="flex gap-2 mt-1 flex-wrap">
-                <span class="text-xs px-2 py-0.5 bg-indigo-950 text-indigo-300 rounded">${t.duration} นาที</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <select onchange="setTaskWhen(${t.id}, this.value)" title="ช่วงเวลาที่ต้องการ" class="text-xs bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-300">
-                <option value="auto" ${(!t.when || t.when === 'auto') ? 'selected' : ''}>🔀 อัตโนมัติ</option>
-                <option value="morning" ${t.when === 'morning' ? 'selected' : ''}>🌅 เช้า</option>
-                <option value="evening" ${t.when === 'evening' ? 'selected' : ''}>🌙 เย็น</option>
-              </select>
-              <span class="text-xs px-2 py-1 rounded font-medium ${t.priority === 'High' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700 text-slate-300'}">${t.priority}</span>
-              <button onclick="removeTask(${t.id})" title="ลบงานนี้" class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition">${Icons.trash}</button>
-            </div>
-          </div>`
-          )
-          .join('')}
-        ${f.tasks.length === 0 ? '<p class="text-sm text-slate-500 text-center py-4">ยังไม่มีกิจกรรมในรายการ เพิ่มได้จากตัวอย่างด้านล่าง</p>' : ''}
-      </div>
-      <p class="text-[11px] text-slate-500 -mt-2">💡 "อัตโนมัติ" ให้ระบบเลือกช่วงที่มีเวลาว่างเหลือมากกว่าให้เอง ส่วน "เช้า"/"เย็น" คือบังคับให้จัดไว้ช่วงนั้นเท่านั้น</p>
-
-      <div class="p-4 bg-slate-900/40 border border-slate-800 rounded-xl space-y-3">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">🌿 เลือกจากกิจกรรมตัวอย่าง (คลิกเพื่อเพิ่มทันที)</p>
-        <div class="flex flex-wrap gap-2">
-          ${TASK_PRESETS.map((p, i) => `<button onclick="addPresetTask(${i})" class="text-xs px-3 py-1.5 rounded-full bg-emerald-950/50 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600 hover:text-white transition flex items-center gap-1">${Icons.plus} ${p.title} <span class="text-slate-400">· ${p.duration}น.</span></button>`).join('')}
-        </div>
-      </div>
-
-      <div class="p-4 bg-slate-900/60 border border-dashed border-slate-700 rounded-xl space-y-3">
-        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">หรือเพิ่มกิจกรรมที่กำหนดเอง</p>
-        <input id="newTaskTitle" type="text" placeholder="ชื่อกิจกรรม เช่น ซ้อมดนตรี" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:border-indigo-500 outline-none" />
-        <div class="grid grid-cols-3 gap-2">
-          <select id="newTaskDuration" class="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-            <option value="15">15 นาที</option><option value="30" selected>30 นาที</option><option value="45">45 นาที</option><option value="60">60 นาที</option><option value="90">90 นาที</option><option value="120">120 นาที</option>
-          </select>
-          <select id="newTaskPriority" class="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-            <option>High</option><option selected>Medium</option><option>Low</option>
-          </select>
-          <select id="newTaskWhen" class="bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-            <option value="auto" selected>🔀 อัตโนมัติ</option>
-            <option value="morning">🌅 เช้า</option>
-            <option value="evening">🌙 เย็น</option>
-          </select>
-        </div>
-        <button onclick="addTask()" class="w-full py-2 bg-slate-700 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium flex justify-center items-center gap-2 transition">${Icons.plus} เพิ่มกิจกรรมนี้</button>
-      </div>
-
-      <div class="flex gap-4 pt-4 border-t border-slate-700">
-        <button onclick="setState({step:2})" class="w-1/3 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium">ย้อนกลับ</button>
-        <button onclick="handleGeneratePlan()" class="w-2/3 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg font-bold shadow-lg shadow-indigo-500/30 flex justify-center items-center gap-2">${Icons.sparkles} Generate Smart Life Schedule</button>
-      </div>
-    </div>`;
-  }
-
-  return `
-  <div class="max-w-3xl mx-auto bg-slate-800/60 border border-slate-700/60 rounded-2xl p-8 backdrop-blur shadow-xl">
-    <div class="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
-      <div><h2 class="text-2xl font-bold text-indigo-300">แบบสอบถามวางแผนชีวิตประจำวัน</h2>
-        <p class="text-slate-400 text-sm">ระบุข้อมูลเวลา สภาพร่างกาย และภาระงานเพื่อให้ระบบคำนวณตารางเวลาที่เหมาะสมที่สุด</p></div>
-      <span class="text-xs font-semibold px-3 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full">Step ${state.step} of 3</span>
-    </div>
-    ${inner}
-  </div>`;
-}
-
-function renderChart(blocks) {
-  const totals = {};
-  blocks.forEach((b) => {
-    const dur = b.e - b.s;
-    totals[b.category] = (totals[b.category] || 0) + dur;
-  });
-  const total = Object.values(totals).reduce((a, c) => a + c, 0) || 1;
-  const palette = ['#6366f1', '#22d3ee', '#f59e0b', '#f43f5e', '#10b981', '#a78bfa', '#eab308', '#38bdf8'];
-  let acc = 0;
-  const stops = [];
-  const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-  entries.forEach(([cat, val], i) => {
-    const pct = (val / total) * 100;
-    stops.push(`${palette[i % palette.length]} ${acc}% ${acc + pct}%`);
-    acc += pct;
-  });
-  const gradient = `conic-gradient(${stops.join(',')})`;
-  const legend = entries
-    .map(
-      ([cat, val], i) =>
-        `<div class="flex items-center gap-2 text-xs text-slate-300"><span class="w-3 h-3 rounded-full inline-block shrink-0" style="background:${palette[i % palette.length]}"></span>${cat} · ${Math.round((val / total) * 100)}% (${Math.round(val)} นาที)</div>`
-    )
-    .join('');
-  return `<div class="flex items-center gap-6 flex-wrap">
-    <div style="width:110px;height:110px;border-radius:50%;background:${gradient};flex-shrink:0;"></div>
-    <div class="space-y-1.5">${legend}</div>
-  </div>`;
-}
-
-function renderDashboard() {
-  if (!state.scheduleResult) return '';
-  const { blocks, cuts, recommendations, aiStatus, focusMinutes } = state.scheduleResult;
-  const focusHours = (focusMinutes / 60).toFixed(1);
-
-  const aiBadge =
-    aiStatus === 'loading'
-      ? `<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400">${Icons.robot} กำลังประมวลผล...</span>`
-      : aiStatus === 'ai'
-      ? `<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">${Icons.sparkles} สร้างโดย AI (Claude ผ่าน API Key ของคุณ)</span>`
-      : `<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300">${Icons.alert} โหมดออฟไลน์ (กฎอัตโนมัติ — ยังไม่ได้ใส่ API Key)</span>`;
-
-  const dims = recommendations
-    ? [
-        { key: 'fitness', title: '1. Fitness & Movement', icon: Icons.dumbbell, color: 'emerald', text: recommendations.fitness },
-        { key: 'nutrition', title: '2. Nutrition & Rest', icon: Icons.heart, color: 'amber', text: recommendations.nutrition },
-        { key: 'mental', title: '3. Mental Wellbeing', icon: Icons.brain, color: 'cyan', text: recommendations.mental },
-        { key: 'growth', title: '4. Personal Growth', icon: Icons.zap, color: 'indigo', text: recommendations.growth }
-      ]
-    : [];
-
-  return `
-  <div class="space-y-8">
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 no-print">
-      <div class="bg-slate-800/80 border border-slate-700/80 p-5 rounded-xl">
-        <div class="flex items-center gap-3 mb-2">${Icons.heart}<span class="text-sm font-semibold text-slate-300">ความพร้อมร่างกายวันนี้</span></div>
-        <div class="text-2xl font-bold text-white">Fatigue: ${state.formData.fatigue}/10</div>
-        <p class="text-xs ${state.formData.fatigue >= 7 ? 'text-amber-400' : 'text-emerald-400'} mt-1">${state.formData.fatigue >= 7 ? '⚠️ ตารางถูกปรับลดความเข้มข้นเพื่อป้องกัน Burnout' : '✓ ระดับความเหนื่อยล้าอยู่ในเกณฑ์ปกติ'}</p>
-      </div>
-      <div class="bg-slate-800/80 border border-slate-700/80 p-5 rounded-xl">
-        <div class="flex items-center gap-3 mb-2">${Icons.clock}<span class="text-sm font-semibold text-slate-300">ช่วงเวลาทำงาน (ตามที่คุณระบุ)</span></div>
-        <div class="text-2xl font-bold text-indigo-300">${focusHours} ชั่วโมง</div>
-        <p class="text-xs text-emerald-400 mt-1">✓ กันไว้เป็นบล็อกเดียว ไม่ถูกแทรกหรือปรับเปลี่ยนโดยระบบ</p>
-      </div>
-      <div class="bg-slate-800/80 border border-slate-700/80 p-5 rounded-xl">
-        <div class="flex items-center gap-3 mb-2">${Icons.brain}<span class="text-sm font-semibold text-slate-300">Smart Cut Efficiency</span></div>
-        <div class="text-2xl font-bold text-cyan-300">${cuts.length} Tasks Adjusted</div>
-        <p class="text-xs text-slate-400 mt-1">ปรับเวลาโดยไม่ข้ามเป้าหมายสำคัญ</p>
-      </div>
-    </div>
-
-    ${
-      cuts.length
-        ? `
-    <div class="bg-amber-950/40 border border-amber-500/40 p-5 rounded-xl no-print">
-      <h3 class="font-semibold text-amber-300 flex items-center gap-2 mb-3">${Icons.alert} Smart Cut & Dynamic Task Adjustment Log</h3>
-      <div class="space-y-2">
-        ${cuts
-          .map(
-            (c) => `<div class="text-sm bg-slate-900/60 p-3 rounded-lg border border-amber-500/20">
-          <div class="flex justify-between font-medium text-amber-200 flex-wrap gap-1"><span>${c.task}</span><span>${c.original} ➔ <span class="text-emerald-400">${c.adjusted}</span></span></div>
-          <p class="text-xs text-slate-400 mt-1">เหตุผล: ${c.reason}</p></div>`
-          )
-          .join('')}
-      </div>
-    </div>`
-        : ''
-    }
-
-    <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 backdrop-blur" id="printArea">
-      <div class="flex justify-between items-center mb-6 flex-wrap gap-3">
-        <h3 class="font-bold text-xl text-white flex items-center gap-2">${Icons.calendar} ตารางเวลาตารางชีวิตอัจฉริยะ (Time-Blocking Schedule)</h3>
-        <div class="flex flex-wrap gap-2 no-print">
-          <button onclick="downloadSchedule()" class="flex items-center gap-2 text-xs font-medium px-3 py-2 bg-slate-700 hover:bg-indigo-600 text-white rounded-lg transition">${Icons.download} .txt</button>
-          <button onclick="printSchedule()" class="flex items-center gap-2 text-xs font-medium px-3 py-2 bg-slate-700 hover:bg-indigo-600 text-white rounded-lg transition">${Icons.download} PDF (พิมพ์)</button>
-          <button onclick="downloadCalendar()" class="flex items-center gap-2 text-xs font-medium px-3 py-2 bg-slate-700 hover:bg-indigo-600 text-white rounded-lg transition">${Icons.download} ปฏิทิน (.ics)</button>
-        </div>
-      </div>
-      <div class="space-y-3">
-        ${blocks
-          .map(
-            (b) => `<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-900/80 border border-slate-800 rounded-xl hover:border-slate-700 transition">
-          <div class="flex items-center gap-4"><span class="text-sm font-mono font-semibold text-indigo-400 w-32">${b.time}</span>
-            <div><div class="font-medium text-slate-200">${b.activity}</div><span class="text-xs text-slate-500">${b.category}</span></div></div>
-          <span class="mt-2 sm:mt-0 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-cyan-300">${b.tag}</span>
-        </div>`
-          )
-          .join('')}
-      </div>
-    </div>
-
-    <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 backdrop-blur no-print">
-      <h3 class="font-bold text-lg text-white mb-4">สัดส่วนเวลาในแต่ละหมวดหมู่ (Time Allocation)</h3>
-      ${renderChart(blocks)}
-    </div>
-
-    <div class="no-print">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3 class="font-bold text-lg text-white">คำแนะนำเฉพาะบุคคล 4 มิติ</h3>
-        ${aiBadge}
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        ${
-          aiStatus === 'loading'
-            ? `
-        <div class="md:col-span-2 bg-slate-800/60 border border-slate-700/60 p-6 rounded-xl text-center text-slate-400 text-sm flex items-center justify-center gap-2">
-          <span class="spin inline-block">${Icons.refresh}</span> กำลังสร้างคำแนะนำเฉพาะบุคคล...
-        </div>`
-            : dims
-                .map(
-                  (d) => `
-        <div class="bg-slate-800/60 border border-slate-700/60 p-6 rounded-xl">
-          <h4 class="font-semibold text-${d.color}-400 flex items-center gap-2 mb-3">${d.icon} ${d.title}</h4>
-          <p class="text-sm text-slate-300">${d.text}</p>
-        </div>`
-                )
-                .join('')
-        }
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderPrompt() {
-  const f = state.formData;
-  const promptText = `<system_prompt>
-  <role>
-    You are an expert "AI Life Design & Schedule Architect" specializing in workload balancing, circadian rhythm optimization, and stress reduction.
-  </role>
-
-  <context>
-    User is a digital worker experiencing fatigue (Level ${f.fatigue}/10) and stress (Level ${f.stress}/10).
-    Workstyle: ${f.workStyle}.
-  </context>
-
-  <task_instructions>
-    1. NEVER schedule anything inside work_start–work_end; keep it as one single, untouched "ทำงาน" block.
-    2. Only place personal/growth tasks in the free windows before work_start (morning) or after work_end (evening).
-    3. Apply Smart Cut algorithm if available free time is less than task duration.
-    4. Ensure time-blocking does not overlap.
-  </task_instructions>
-
-  <input_data>
-    <schedule wake="${f.wakeTime}" sleep="${f.sleepTime}" work_start="${f.workStart}" work_end="${f.workEnd}" />
-    <tasks>
-      ${f.tasks.map((t) => `<task name="${anonymize(t.title)}" duration="${t.duration}m" priority="${t.priority}" />`).join('\n      ')}
-    </tasks>
-  </input_data>
-</system_prompt>`;
-
-  const hasKey = !!getStoredApiKey();
-
-  return `
-  <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 backdrop-blur space-y-4">
-    <div class="flex justify-between items-center border-b border-slate-700 pb-3 flex-wrap gap-2">
-      <h2 class="text-xl font-bold text-indigo-300 flex items-center gap-2">${Icons.code} RCTF & XML System Prompt Architecture</h2>
-      <span class="text-xs ${hasKey ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'} px-3 py-1 rounded-full border flex items-center gap-1">${Icons.robot} ${hasKey ? 'เชื่อมต่อ Claude API ด้วย Key ของคุณ' : 'ยังไม่ได้ตั้งค่า API Key (โหมดออฟไลน์)'}</span>
-    </div>
-    <p class="text-sm text-slate-400">การออกแบบ Prompt โดยใช้องค์ประกอบ <strong>RCTF Framework</strong> (Role, Context, Task, Format) ร่วมกับ <strong>XML Tags</strong> เพื่อความแม่นยำในการจัดสรรเวลาของ AI — เวอร์ชันนี้ Task ที่แสดงผ่านการ Anonymize แล้วก่อนส่งจริง:</p>
-    <pre class="bg-slate-950 p-5 rounded-xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap leading-relaxed">${promptText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
-    <p class="text-xs text-slate-500">หมายเหตุ: ตารางเวลา (Time-Blocking) คำนวณด้วยอัลกอริทึม Rule-based Smart Cut แบบ deterministic ในฝั่งเว็บเบราว์เซอร์เสมอ ไม่ต้องพึ่ง AI เลยก็ทำงานได้ ส่วนคำแนะนำ 4 มิติในหน้า Dashboard จะเรียก Claude API จริงก็ต่อเมื่อคุณใส่ API Key ของตัวเองในแท็บ <strong>Privacy & AI Settings</strong> โดยส่งเฉพาะข้อมูลที่ผ่านการ Anonymize แล้วเท่านั้น หากไม่ใส่ Key ระบบจะใช้คำแนะนำสำรองแบบ rule-based แทน</p>
-  </div>`;
-}
-
-function renderPrivacy() {
-  const liveTasks = state.formData.tasks
-    .map(
-      (t) => `<div class="grid grid-cols-2 gap-2 text-xs font-mono py-1 border-b border-slate-800/60 last:border-0">
-    <span class="text-slate-400 truncate">${t.title}</span><span class="text-emerald-400 truncate">${anonymize(t.title)}</span></div>`
-    )
-    .join('');
-
-  const hasKey = !!getStoredApiKey();
-
-  return `
-  <div class="space-y-6">
-  <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 backdrop-blur space-y-6">
-    <div class="flex items-center gap-3 border-b border-slate-700 pb-4">
-      <div class="text-emerald-400">${Icons.shield}</div>
-      <div><h2 class="text-xl font-bold text-white">Privacy-First Data Shield</h2>
-        <p class="text-sm text-slate-400">ระบบปกป้องข้อมูลส่วนบุคคลและการแทนที่ข้อมูล (Anonymization Layer) — ทำงานจริงบนฝั่ง Browser ก่อนส่งให้ AI</p></div>
-    </div>
-
-    <div>
-      <h4 class="font-semibold text-slate-300 text-sm mb-2">ทดลองพิมพ์ข้อความที่มีข้อมูลส่วนตัว (Live Demo)</h4>
-      <textarea id="anonDemoInput" oninput="setState({anonDemoInput:this.value})" rows="2" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none font-mono">${state.anonDemoInput}</textarea>
-      <div class="mt-2 p-3 bg-slate-950 border border-emerald-500/20 rounded-lg text-xs font-mono text-emerald-400">${anonymize(state.anonDemoInput)}</div>
-    </div>
-
-    <div>
-      <h4 class="font-semibold text-slate-300 text-sm mb-2">รายการงานปัจจุบันของคุณ ➔ ข้อมูลที่ระบบจะส่งให้ AI จริง</h4>
-      <div class="bg-slate-950 p-3 rounded-lg border border-slate-800">
-        <div class="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-500 pb-1 border-b border-slate-800"><span>ข้อมูลดิบ</span><span>ข้อมูลหลัง Anonymize</span></div>
-        ${liveTasks || '<p class="text-xs text-slate-500 py-2">ยังไม่มีงานในรายการ</p>'}
-      </div>
-    </div>
-
-    <div class="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs text-emerald-200">
-      ✓ การประมวลผล Anonymization เกิดขึ้นในเบราว์เซอร์ของผู้ใช้ก่อนเรียก AI เสมอ ข้อมูลดิบจะไม่ถูกส่งออกไปภายนอก และตารางเวลาที่คำนวณด้วยอัลกอริทึมในเครื่องไม่ต้องพึ่ง AI เลยก็ทำงานได้ (AI ใช้เสริมเฉพาะส่วนคำแนะนำ)
-    </div>
-  </div>
-
-  <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 backdrop-blur space-y-4">
-    <div class="flex items-center gap-3 border-b border-slate-700 pb-4">
-      <div class="text-indigo-400">${Icons.key}</div>
-      <div><h2 class="text-xl font-bold text-white">เปิดใช้งาน AI จริง (ไม่บังคับ)</h2>
-        <p class="text-sm text-slate-400">ใส่ Anthropic API Key ของคุณเองเพื่อให้ Claude ช่วยเขียนคำแนะนำ 4 มิติแบบเจาะจง แทนคำแนะนำสำรอง (rule-based) ที่ใช้อยู่โดยดีฟอลต์</p>
-      </div>
-    </div>
-    <div class="space-y-3">
-      <label class="block text-xs font-medium text-slate-400">Anthropic API Key</label>
-      <input id="apiKeyInput" type="password" placeholder="sk-ant-..." value="${state.apiKeyInput || ''}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white font-mono focus:border-indigo-500 outline-none" />
-      <div class="flex gap-3">
-        <button onclick="handleSaveApiKey()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium">บันทึก Key</button>
-        <button onclick="handleClearApiKey()" class="flex-1 py-2.5 bg-slate-700 hover:bg-rose-600 text-white rounded-lg text-sm font-medium">ล้าง Key</button>
-      </div>
-      <p class="text-xs ${hasKey ? 'text-emerald-400' : 'text-slate-500'}">${hasKey ? '✓ พบ API Key ที่บันทึกไว้ในเบราว์เซอร์นี้แล้ว ระบบจะเรียก Claude จริงในครั้งถัดไปที่คุณกด Generate' : 'ยังไม่ได้ตั้งค่า — ระบบจะใช้คำแนะนำสำรองแบบ rule-based ต่อไป'}</p>
-      <div class="p-3 bg-amber-950/30 border border-amber-500/30 rounded-lg text-xs text-amber-200">
-        ⚠️ Key จะถูกเก็บไว้ใน <code>localStorage</code> ของเบราว์เซอร์นี้เท่านั้น และถูกส่งตรงจากเบราว์เซอร์ไปยัง Anthropic API โดยตรง — ไม่ผ่านเซิร์ฟเวอร์อื่นใด เหมาะสำหรับใช้งานส่วนตัวบนเครื่องที่คุณเชื่อถือ ไม่แนะนำให้ใช้ Key นี้บนเว็บที่เผยแพร่ให้คนอื่นเข้าใช้งานร่วมกัน
-      </div>
-    </div>
-  </div>
-  </div>`;
-}
-
-function render() {
-  let mainContent = '';
-  if (state.activeTab === 'wizard') mainContent = renderWizard();
-  else if (state.activeTab === 'dashboard') mainContent = renderDashboard();
-  else if (state.activeTab === 'prompt') mainContent = renderPrompt();
-  else if (state.activeTab === 'privacy') mainContent = renderPrivacy();
-
-  document.getElementById('app').innerHTML = `
-    <div class="min-h-screen bg-slate-900 text-slate-100 pb-12">
-      ${renderHeader()}
-      <main class="max-w-7xl mx-auto px-6 mt-8">${mainContent}</main>
-    </div>`;
-}
-// =========================================================================
-// Boot: render once, then try to restore the visitor's last saved plan
-// from this browser's localStorage.
-// =========================================================================
-(function boot() {
-  render();
-  const saved = loadSavedPlan();
-  if (saved && saved.formData && saved.scheduleResult) {
-    state.formData = saved.formData;
-    state.scheduleResult = saved.scheduleResult;
-    state.isGenerated = true;
-    state.activeTab = 'dashboard';
-    render();
-  }
-})();
