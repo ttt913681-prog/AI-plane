@@ -463,6 +463,48 @@ function setFormData(patch) {
   render();
 }
 
+// Time input helper:
+// Accepts easy numeric input such as 630, 0630, 930, or 09:30
+// and converts it to the HH:MM format used by the scheduling engine.
+function normalizeTimeInput(value) {
+  let raw = String(value || '').trim();
+
+  if (!raw) return '';
+
+  // Keep only numbers when the user types without a colon.
+  if (!raw.includes(':')) {
+    raw = raw.replace(/\D/g, '');
+
+    if (raw.length === 1) raw = '0' + raw + '00';
+    else if (raw.length === 2) raw = raw + '00';
+    else if (raw.length === 3) raw = '0' + raw;
+    else if (raw.length > 4) raw = raw.slice(0, 4);
+
+    if (raw.length === 4) {
+      raw = raw.slice(0, 2) + ':' + raw.slice(2);
+    }
+  }
+
+  const match = raw.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!match) return '';
+
+  let h = Number(match[1]);
+  let m = Number(match[2]);
+
+  if (h > 23) h = 23;
+  if (m > 59) m = 59;
+
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+function setTimeField(key, value) {
+  const normalized = normalizeTimeInput(value);
+  if (!normalized) return;
+
+  state.formData = { ...state.formData, [key]: normalized };
+  render();
+}
+
 const TASK_PRESETS = [
   { title: 'ออกกำลังกาย', duration: 45, priority: 'Medium', type: 'Personal' },
   { title: 'อ่านหนังสือพัฒนาตนเอง', duration: 30, priority: 'Low', type: 'Personal' },
@@ -570,13 +612,13 @@ function renderWizard() {
       <h3 class="font-semibold text-lg text-cyan-300 flex items-center gap-2">${Icons.clock} 1. ช่วงเวลาปกติและตารางงาน (Daily Routine)</h3>
       <div class="grid grid-cols-2 gap-4">
         <div><label class="block text-xs font-medium text-slate-400 mb-1">เวลาตื่นนอน</label>
-          <input type="time" value="${f.wakeTime}" oninput="setFormData({wakeTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="เช่น 0630" value="${f.wakeTime}" onblur="setTimeField('wakeTime', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">เข้านอน</label>
-          <input type="time" value="${f.sleepTime}" oninput="setFormData({sleepTime:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="เช่น 2300" value="${f.sleepTime}" onblur="setTimeField('sleepTime', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">เริ่มงาน</label>
-          <input type="time" value="${f.workStart}" oninput="setFormData({workStart:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="เช่น 0900" value="${f.workStart}" onblur="setTimeField('workStart', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div><label class="block text-xs font-medium text-slate-400 mb-1">เลิกงาน</label>
-          <input type="time" value="${f.workEnd}" oninput="setFormData({workEnd:this.value})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
+          <input type="text" inputmode="numeric" maxlength="5" placeholder="เช่น 1800" value="${f.workEnd}" onblur="setTimeField('workEnd', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" /></div>
         <div class="col-span-2"><label class="block text-xs font-medium text-slate-400 mb-1">เวลาเดินทาง (ต่อเที่ยว, นาที)</label>
           <input type="number" min="0" max="180" step="5" value="${f.travelMinutes}" oninput="setFormData({travelMinutes: parseInt(this.value)||0})" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none" />
           <p class="text-[11px] text-slate-500 mt-1">ใช้คำนวณเวลาออกจากบ้านและเวลาถึงบ้าน (นับเที่ยวเดียว จะถูกใช้ทั้งขาไปและขากลับ)</p></div>
