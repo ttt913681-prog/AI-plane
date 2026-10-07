@@ -597,7 +597,6 @@ function renderHeader() {
     <nav class="flex gap-2 mt-4 sm:mt-0 flex-wrap">
       ${navButton('wizard', 'Setup Wizard', Icons.clock)}
       ${navButton('dashboard', 'Life Dashboard', Icons.calendar, !state.isGenerated)}
-      ${navButton('prompt', 'RCTF Prompt Engine', Icons.code)}
       ${navButton('privacy', 'Privacy & AI Settings', Icons.shield)}
     </nav>
   </header>`;
@@ -977,7 +976,6 @@ function render() {
   let mainContent = '';
   if (state.activeTab === 'wizard') mainContent = renderWizard();
   else if (state.activeTab === 'dashboard') mainContent = renderDashboard();
-  else if (state.activeTab === 'prompt') mainContent = renderPrompt();
   else if (state.activeTab === 'privacy') mainContent = renderPrivacy();
 
   document.getElementById('app').innerHTML = `
