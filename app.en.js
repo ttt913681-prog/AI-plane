@@ -979,12 +979,6 @@ function renderPrivacy() {
   </div>`;
 }
 
-function render() {
-  let mainContent = '';
-  if (state.activeTab === 'wizard') mainContent = renderWizard();
-  else if (state.activeTab === 'dashboard') mainContent = renderDashboard();
-  else if (state.activeTab === 'privacy') mainContent = renderPrivacy();
-
   document.getElementById('app').innerHTML = `
     <div class="min-h-screen bg-slate-900 text-slate-100 pb-12">
       ${renderHeader()}
