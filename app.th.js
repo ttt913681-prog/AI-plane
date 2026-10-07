@@ -977,7 +977,6 @@ function render() {
   let mainContent = '';
   if (state.activeTab === 'wizard') mainContent = renderWizard();
   else if (state.activeTab === 'dashboard') mainContent = renderDashboard();
-  else if (state.activeTab === 'prompt') mainContent = renderPrompt();
   else if (state.activeTab === 'privacy') mainContent = renderPrivacy();
 
   document.getElementById('app').innerHTML = `
